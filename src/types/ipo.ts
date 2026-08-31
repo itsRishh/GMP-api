@@ -1,5 +1,9 @@
+export type IPOCategory = "mainboard" | "sme" | "all";
+
 export interface IPO {
   id: number;
+  sourceId?: string;
+  category?: IPOCategory;
   name: string;
   url: string;
   gmp: string;
@@ -21,9 +25,21 @@ export interface IPO {
   ipoDate: string;
   status: string;
   lastUpdated: string;
+  createdAt?: number;
+  updatedAt?: number;
+  isActive?: boolean;
+}
+
+export interface IPOGroupedResponse {
+  all: IPO[];
+  mainboard: IPO[];
+  sme: IPO[];
+  lastUpdated?: string;
 }
 
 export interface IPOApiResponse {
   success: boolean;
-  data: IPO[];
+  count: number;
+  data: IPO[] | IPOGroupedResponse;
+  lastUpdated?: string;
 }

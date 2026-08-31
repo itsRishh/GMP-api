@@ -9,7 +9,16 @@ import type {
 } from "./types/ipo";
 
 function normalizeIPOData(
-  value: IPO[] | { ipos?: IPO[]; mainboard?: IPO[]; sme?: IPO[] } | null | undefined
+  value:
+    | IPO[]
+    | {
+        ipos?: IPO[];
+        all?: IPO[];
+        mainboard?: IPO[];
+        sme?: IPO[];
+      }
+    | null
+    | undefined
 ): IPO[] {
   if (Array.isArray(value)) {
     return value;
@@ -21,6 +30,10 @@ function normalizeIPOData(
 
   if (Array.isArray(value.ipos)) {
     return value.ipos;
+  }
+
+  if (Array.isArray(value.all)) {
+    return value.all;
   }
 
   if (Array.isArray(value.mainboard) || Array.isArray(value.sme)) {
@@ -67,12 +80,18 @@ export default function App() {
         );
       }
 
-      setIpoData(normalizeIPOData(result.data));
+      const normalized = normalizeIPOData(result.data);
+      setIpoData(normalized);
       setLastUpdatedAt(
-        new Date().toLocaleString("en-IN", {
-          dateStyle: "medium",
-          timeStyle: "medium",
-        })
+        result.lastUpdated
+          ? new Date(result.lastUpdated).toLocaleString("en-IN", {
+              dateStyle: "medium",
+              timeStyle: "medium",
+            })
+          : new Date().toLocaleString("en-IN", {
+              dateStyle: "medium",
+              timeStyle: "medium",
+            })
       );
     } catch (error) {
       console.error(error);

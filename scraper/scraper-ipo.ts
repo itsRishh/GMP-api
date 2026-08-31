@@ -1,7 +1,10 @@
+import "dotenv/config";
+
 import fs from "fs";
 import path from "path";
 import { pathToFileURL } from "url";
 
+import { ConvexHttpClient } from "convex/browser";
 import { chromium } from "playwright";
 
 const URL =
@@ -10,6 +13,18 @@ const URL =
 const SOURCE_BASE_URL = "https://www.investorgain.com";
 
 const OUTPUT_FILE = path.join(process.cwd(), "ipos.json");
+
+function resolveConvexConfig() {
+  const url = (process.env.CONVEX_URL ?? process.env.VITE_CONVEX_URL ?? "").trim();
+  const adminKey = (process.env.CONVEX_ADMIN_KEY ?? "").trim();
+
+  return {
+    url,
+    adminKey,
+  };
+}
+
+const { url: CONVEX_URL, adminKey: CONVEX_ADMIN_KEY } = resolveConvexConfig();
 
 export interface IPO {
   id: number;
@@ -65,6 +80,51 @@ function normalizeStatus(nameText: string): string {
   }
 
   return "Open";
+}
+
+function classifyIPO(name: string): "mainboard" | "sme" | "all" {
+  if (/SME|BSE SME|NSE SME/i.test(name)) {
+    return "sme";
+  }
+
+  return "mainboard";
+}
+
+function normalizeForConvex(ipo: IPO, index: number): Record<string, unknown> {
+  const category = classifyIPO(ipo.name);
+  const sourceId = `${category}-${(ipo.name || "ipo")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "ipo"}-${index + 1}`;
+
+  return {
+    sourceId,
+    category,
+    name: ipo.name,
+    url: ipo.url,
+    gmp: ipo.gmp,
+    trend: ipo.trend,
+    rating: ipo.rating,
+    sub: ipo.sub,
+    price: ipo.price,
+    ipoSize: ipo.ipoSize,
+    lot: ipo.lot,
+    open: ipo.open,
+    close: ipo.close,
+    boaDate: ipo.boaDate,
+    listing: ipo.listing,
+    updatedOn: ipo.updatedOn,
+    anchor: ipo.anchor,
+    priceBand: ipo.priceBand,
+    estimatedListing: ipo.estimatedListing,
+    listingGain: ipo.listingGain,
+    ipoDate: ipo.ipoDate,
+    status: ipo.status,
+    lastUpdated: ipo.lastUpdated || new Date().toISOString(),
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    isActive: true,
+  };
 }
 
 export async function scrapeIPOData(): Promise<IPO[]> {
@@ -213,6 +273,39 @@ export async function saveToJSON(data: IPO[]): Promise<void> {
   console.log(`Saved ${data.length} IPOs to ipos.json`);
 }
 
+type ConvexHttpClientWithAdminAuth = ConvexHttpClient & {
+  setAdminAuth?: (token: string) => void;
+};
+
+export async function saveToConvex(data: IPO[]): Promise<number> {
+  if (!CONVEX_URL) {
+    throw new Error(
+      "Missing Convex deployment URL. Run npx convex dev or set CONVEX_URL in .env before writing to Convex."
+    );
+  }
+
+  if (CONVEX_ADMIN_KEY && (CONVEX_ADMIN_KEY.startsWith("http://") || CONVEX_ADMIN_KEY.startsWith("https://"))) {
+    console.warn(
+      "CONVEX_ADMIN_KEY looks like a Convex site URL, not an admin key. Ignoring it; the deployment URL is enough for local/dev reads and public writes."
+    );
+  }
+
+  const client = new ConvexHttpClient(CONVEX_URL) as ConvexHttpClientWithAdminAuth;
+
+  if (typeof client.setAdminAuth === "function" && CONVEX_ADMIN_KEY && !CONVEX_ADMIN_KEY.startsWith("http://") && !CONVEX_ADMIN_KEY.startsWith("https://")) {
+    client.setAdminAuth(CONVEX_ADMIN_KEY);
+  }
+
+  const items = data.map((ipo, index) => normalizeForConvex(ipo, index));
+
+  const result = await client.mutation("ipoData:replaceSnapshot", {
+    items,
+  });
+
+  console.log(`Saved ${result.count ?? items.length} IPOs to Convex table ipoData`);
+  return result.count ?? items.length;
+}
+
 export async function refreshIPOData(): Promise<IPO[]> {
   const data = await scrapeIPOData();
 
@@ -221,7 +314,14 @@ export async function refreshIPOData(): Promise<IPO[]> {
     return data;
   }
 
-  await saveToJSON(data);
+  const convextCount = await saveToConvex(data);
+
+  if (convextCount === 0) {
+    await saveToJSON(data);
+  } else {
+    await saveToJSON(data);
+  }
+
   return data;
 }
 

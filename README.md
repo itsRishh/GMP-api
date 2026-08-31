@@ -1,63 +1,76 @@
 # IPO GMP Watch
 
-IPO GMP Watch is a React + TypeScript dashboard for tracking Indian IPO grey market premium data. The app reads IPO data from a local JSON file served by an Express API and displays it in a live-looking table with summary stats.
+IPO GMP Watch is a React + TypeScript dashboard for tracking Indian IPO grey market premium data. The app scrapes the live Investorgain IPO table, stores the latest snapshot in Convex, serves it through an Express API, and displays it in a live dashboard.
+
+## Production architecture
+
+The project now follows this flow:
+
+```text
+scraper -> Convex -> Express API -> React frontend
+```
+
+The scraper refreshes the source table every 30 minutes, writes the normalized snapshot to Convex, and the API reads from Convex instead of a local JSON file. The frontend continues to receive the same response shape expected by the current dashboard.
 
 ## Features
 
 - Dashboard with IPO summary cards
-- Searchable and sortable IPO table
-- Data fetched from a local API endpoint
-- Scraper to refresh market data from the source website
-- Vite frontend with proxy to the backend API
+- Full IPO table and live GMP display
+- 30-minute automated scrape refresh
+- Convex-backed persistent storage
+- Render-ready Express server with `/health` endpoint
+- Frontend debug timestamp showing when data was last refreshed
 
 ## Tech stack
 
 - React 19 + TypeScript + Vite
 - Express API server
-- Axios + Cheerio for scraping IPO market data
-- Tailwind CSS for UI styling
+- Playwright-based scraping from Investorgain
+- Convex for persistence and snapshot storage
+- Tailwind CSS for styling
 
 ## Prerequisites
 
-Before running the project, make sure you have:
+Before running locally, make sure you have:
 
 - Node.js 18 or newer
 - npm 9 or newer
+- A Convex deployment URL and admin key for production use
 
-## Project setup
+## Local development setup
 
-1. Open a terminal in the project root.
-2. Install dependencies:
+1. Install dependencies:
 
 ```bash
 npm install
 ```
 
-3. Fetch the latest IPO data so the API has a source file to serve:
+2. Create the environment file:
 
 ```bash
-npm run scrape
+cp .env.example .env
 ```
 
-This creates or refreshes the file `ipos.json` in the project root.
+Update `.env` with your values:
 
-## Run the app
+```env
+PORT=3000
+CONVEX_URL=https://your-deployment.convex.cloud
+CONVEX_ADMIN_KEY=your-admin-key
+```
 
-You need two processes running at the same time:
-
-### 1) Start the API server
+3. Start the API:
 
 ```bash
 npm run api
 ```
 
-This starts the Express API on:
+This runs the Express server and exposes:
 
-- http://localhost:3000/api/ipos
+- `http://localhost:3000/api/ipos`
+- `http://localhost:3000/health`
 
-### 2) Start the frontend
-
-Open a second terminal and run:
+4. Start the frontend in a second terminal:
 
 ```bash
 npm run dev
@@ -65,153 +78,156 @@ npm run dev
 
 Then open:
 
-- http://localhost:5173
+- `http://localhost:5173`
 
-The Vite app is configured to proxy `/api` requests to the local Express server.
+5. Run the scraper manually if you want to refresh data immediately:
+
+```bash
+npm run scrape
+```
+
+## Production deployment on Render
+
+### 1) Create a Convex project
+
+1. Go to https://convex.dev
+2. Create a new project
+3. Copy the deployment URL, for example:
+
+```text
+https://happy-otter-123.convex.cloud
+```
+
+4. Copy the admin key from the Convex dashboard
+5. Add these values to your Render service environment variables
+
+### 2) Prepare the repository
+
+The project already includes:
+
+- `convex/schema.ts`
+- `convex/ipoData.ts`
+- `render.yaml`
+- `.env.example`
+
+Deploy the backend and frontend as a single web service on Render, with the server reading from Convex at runtime.
+
+### 3) Add environment variables in Render
+
+Set these values in the Render dashboard:
+
+```env
+NODE_ENV=production
+PORT=3000
+CONVEX_URL=https://your-deployment.convex.cloud
+CONVEX_ADMIN_KEY=your-admin-key
+```
+
+### 4) Build and start commands
+
+Use these values in Render:
+
+```bash
+npm install && npm run build
+npm run start
+```
+
+The service health check path is:
+
+```text
+/health
+```
+
+### 5) Deploy the Convex backend
+
+After the app is connected to your Convex deployment, deploy the schema and functions with the Convex CLI:
+
+```bash
+npx convex dev
+```
+
+or in production:
+
+```bash
+npx convex deploy
+```
+
+This ensures the `ipoData` table and the `getIpoData` query exist before the app starts reading from Convex.
+
+## Render service behavior
+
+The app is designed to work in production as follows:
+
+- Express server starts on the Render-assigned port
+- `/health` returns a 200 status for health checks
+- `/api/ipos` loads the latest IPO data from Convex
+- if Convex is not configured, it falls back to the local `ipos.json` file
+- scraper runs on a timer and refreshes Convex with the latest live source data
 
 ## Build for production
-
-To create a production build:
 
 ```bash
 npm run build
 ```
 
-To preview the production build locally:
+To preview the frontend locally:
 
 ```bash
 npm run preview
 ```
 
-## Deploy to Vercel
-
-This project can be deployed to Vercel as a frontend-only app. Since the scraper and local API are part of the project, Vercel deployment needs one small adjustment: the API should be moved to a serverless function or hosted elsewhere.
-
-### Recommended Vercel setup
-
-Use Vercel for the frontend only, and keep the Express API running on a separate host or serverless environment if you want live scraped data in production.
-
-### 1) Push the project to GitHub
-
-```bash
-git init
-git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin <your-repo-url>
-git push -u origin main
-```
-
-### 2) Import the project in Vercel
-
-1. Open https://vercel.com
-2. Click "Add New Project"
-3. Import your GitHub repository
-4. Set the project root to the repository root
-5. Keep the default Vercel settings for a Vite app
-
-### 3) Framework settings
-
-Vercel should detect Vite automatically. The build command is:
-
-```bash
-npm run build
-```
-
-The output directory is:
-
-```bash
-dist
-```
-
-### 4) Configure environment variables
-
-If you later move the API to Vercel Serverless Functions, add any required variables here.
-
-For the current local setup, no special environment variables are required.
-
-### 5) Important note about the scraper and API
-
-The app currently depends on:
-
-- a local Express API on port 3000
-- a local scraper that writes `ipos.json`
-
-Vercel does not run a long-lived local Express server the same way as your machine does. For production deployment, the recommended approach is:
-
-- deploy the frontend to Vercel
-- host the API separately, or
-- convert the API into Vercel serverless routes
-- keep the scraper as a scheduled job or server process that updates the JSON file before the app is served
-
-### Example serverless API pattern
-
-If you want to keep everything on Vercel, move the logic from `server/server.ts` into a route such as:
-
-```ts
-// api/ipos.ts
-export default function handler(req, res) {
-  res.status(200).json({ success: true, data: [] });
-}
-```
-
-Then fetch from the Vercel route instead of `http://localhost:3000/api/ipos`.
-
-### Static deployment summary
-
-For the simplest deployment:
-
-```bash
-npm install
-npm run build
-```
-
-Then upload the `dist` folder to Vercel or connect the repo to Vercel.
-
 ## Project structure
 
 ```text
 .
+├── convex/
+│   ├── schema.ts          # Convex data model
+│   └── ipoData.ts        # Queries and mutations for IPO snapshots
 ├── server/
-│   └── server.ts        # Express API that serves ipos.json
+│   └── server.ts         # Express API and health route
 ├── scraper/
-│   └── scraper-ipo.ts   # Scrapes the latest IPO data from the source website
+│   └── scraper-ipo.ts    # Scrapes the live IPO table and refreshes Convex
 ├── src/
-│   ├── App.tsx          # Main dashboard layout
-│   ├── components/      # UI components
-│   └── types/           # Type definitions
-├── ipos.json            # Fetched IPO data used by the API
-├── package.json         # Scripts and dependencies
-├── vite.config.ts       # Vite config with API proxy
+│   ├── App.tsx           # Main dashboard layout
+│   ├── components/       # UI components
+│   └── types/            # Type definitions
+├── .env.example          # Environment template
+├── render.yaml           # Render configuration
+├── ipos.json             # Local fallback snapshot
+├── package.json          # Scripts and dependencies
+├── vite.config.ts        # Vite config with API proxy
 ├── index.html
-└── README.md
+├── README.md
+└── .gitignore
 ```
 
 ## Troubleshooting
 
-### API returns 404 or empty data
+### API returns empty data
 
-Make sure the `ipos.json` file exists and the API server is running.
+Check that:
 
 ```bash
-npm run scrape
 npm run api
+```
+
+and that the `CONVEX_URL` and `CONVEX_ADMIN_KEY` values are correct if using the production setup.
+
+### Convex data is not loading
+
+Verify the schema is deployed and the `ipoData` table exists:
+
+```bash
+npx convex deploy
 ```
 
 ### Frontend cannot load IPO data
 
-Confirm both processes are running and that the Vite dev server can reach the API on port 3000.
-
-### Build fails on a case-sensitive system
-
-The project uses a file named `stats.tsx`. If you see a case mismatch during build, make sure imports match the file name exactly:
-
-```ts
-import Stats from "./components/stats";
-```
+Confirm that both the frontend and backend are running, and that the API can return a valid response from `/api/ipos`.
 
 ## Notes
 
-- Market data is scraped from a public source and may sometimes change format.
-- The app is intended for local development and dashboard viewing, not as a production-grade financial data platform.
+- Market data is scraped from a public source and may change format over time.
+- The scraper is set to refresh every 30 minutes by default.
+- `ipos.json` remains as a local fallback while Convex is the primary persistent store for production.
 
