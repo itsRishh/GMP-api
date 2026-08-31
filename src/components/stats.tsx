@@ -1,10 +1,12 @@
 import type { IPO } from "../types/ipo";
 
 interface StatsProps {
-  ipos: IPO[];
+  data: IPO[];
 }
 
-export default function Stats({ ipos }: StatsProps) {
+export default function Stats({ data }: StatsProps) {
+  const ipos = Array.isArray(data) ? data : [];
+
   const openIPOs = ipos.filter(
     (ipo) => ipo.status === "Open"
   ).length;
